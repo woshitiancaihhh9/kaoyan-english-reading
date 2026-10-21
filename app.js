@@ -1,6 +1,9 @@
 (function(){
   var KEY='kyeng.v1',NAVKEY='kyeng.navHidden',store={m:{},w:{},d:{},c:{},e:{}};
   try{var s=JSON.parse(localStorage.getItem(KEY)||'{}');for(var k in store)store[k]=s[k]||{};}catch(e){}
+  var VKEY='kyeng.view',view={f:'all',hm:0};try{var vv=JSON.parse(localStorage.getItem(VKEY)||'{}');if(vv.f)view.f=vv.f;view.hm=vv.hm?1:0;}catch(e){}
+  function saveView(){try{localStorage.setItem(VKEY,JSON.stringify(view));}catch(e){}}
+  function done(id){return !!(store.d[id]||store.m[id]||store.w[id]);}
   function save(){try{localStorage.setItem(KEY,JSON.stringify(store));}catch(e){}}
   var root=document.documentElement,body=document.body;
   var btn=document.getElementById('navtoggle');
@@ -19,20 +22,23 @@
     var g=GAP[Math.min(c,2)],left=g-dd;return '连对 '+c+' 次 · '+(store.m[id]?'已掌握':(left>0?left+' 天后复习':'今天该复习'))+(c>=3&&!store.m[id]?' · 可以勾「已掌握」了':'');}
   function cnt(map,ch){var p=ch+':',n=0;for(var k in map)if(k.indexOf(p)===0&&map[k])n++;return n;}
   function all(map){var n=0;for(var k in map)if(map[k])n++;return n;}
+  function cntDone(ch){var p=ch==null?'':ch+':',s={},n=0;[store.d,store.m,store.w].forEach(function(mp){for(var k in mp)if(mp[k]&&k.indexOf(p)===0&&!s[k]){s[k]=1;n++;}});return n;}
+  function dbar(b,pct){if(!b)return;var d=b.previousElementSibling;if(!d||!d.classList.contains('bar-done')){d=document.createElement('span');d.className='bar-done';b.parentNode.insertBefore(d,b);}d.style.width=pct+'%';}
   function refresh(){
     document.querySelectorAll('[data-ch]').forEach(function(el){
-      var ch=el.getAttribute('data-ch'),t=+el.getAttribute('data-total')||0,d=cnt(store.m,ch),w=cnt(store.w,ch);
-      var p=el.querySelector('[data-prog]');if(p)p.textContent=d+'/'+t+(w&&el.hasAttribute('data-showw')?' · 再错 '+w:'');
-      var b=el.querySelector('[data-bar]');if(b)b.style.width=(t?Math.round(d*100/t):0)+'%';
-      el.classList.toggle('ch-done',t>0&&d>=t);
+      var ch=el.getAttribute('data-ch'),t=+el.getAttribute('data-total')||0,d=cnt(store.m,ch),w=cnt(store.w,ch),dn=Math.min(cntDone(ch),t);
+      var p=el.querySelector('[data-prog]');if(p){p.textContent='已做 '+dn+'/'+t+(w&&el.hasAttribute('data-showw')?' · 再错 '+w:'');p.title='已做 '+dn+' · 待做 '+(t-dn)+' · 已掌握 '+d+' · 再错 '+w;}
+      var b=el.querySelector('[data-bar]');if(b)b.style.width=(t?Math.round(d*100/t):0)+'%';dbar(b,t?Math.round(dn*100/t):0);
+      el.classList.toggle('ch-done',t>0&&dn>=t);
     });
     document.querySelectorAll('[data-all-total]').forEach(function(el){
-      var t=+el.getAttribute('data-all-total'),d=all(store.m);
-      var p=el.querySelector('[data-all-prog]');if(p)p.textContent='已掌握 '+d+' / '+t+' · 再错 '+all(store.w);
-      var b=el.querySelector('[data-all-bar]');if(b)b.style.width=(t?(d*100/t).toFixed(1):0)+'%';
+      var t=+el.getAttribute('data-all-total'),d=all(store.m),dn=Math.min(cntDone(null),t);
+      var p=el.querySelector('[data-all-prog]');if(p)p.textContent='已做 '+dn+' / '+t+' · 待做 '+(t-dn)+' · 已掌握 '+d+' · 再错 '+all(store.w);
+      var b=el.querySelector('[data-all-bar]');if(b)b.style.width=(t?(d*100/t).toFixed(1):0)+'%';dbar(b,t?(dn*100/t).toFixed(1):0);
     });
     var st=document.getElementById('stat');
-    if(st){var qs=document.querySelectorAll('article.q'),m=0,w=0;qs.forEach(function(a){if(store.m[a.dataset.qid])m++;if(store.w[a.dataset.qid])w++;});st.textContent='本页 已掌握 '+m+'/'+qs.length+' · 再错 '+w;}
+    if(st){var qs=document.querySelectorAll('article.q'),m=0,w=0,dn=0;qs.forEach(function(a){var id=a.dataset.qid;if(store.m[id])m++;if(store.w[id])w++;if(done(id))dn++;});
+      st.innerHTML='已做 <b>'+dn+'</b>/'+qs.length+' · 待做 <b>'+(qs.length-dn)+'</b> · 已掌握 '+m+' · 再错 '+w;var ps=document.getElementById('pstat');if(ps)ps.innerHTML='本页 '+st.innerHTML;}
     document.querySelectorAll('article.q[data-qid]').forEach(function(a){var s=a.querySelector('.streak');if(s)s.textContent=streakTxt(a.dataset.qid);});
     renderHome();
   }
@@ -76,14 +82,30 @@
     opts.forEach(function(o){o.addEventListener('click',function(){if(a.classList.contains('done'))return;opts.forEach(function(x){x.classList.remove('sel');});o.classList.add('sel');judge(o);});});
     if(det)det.addEventListener('toggle',function(){if(det.open)markLoc(num,true);else if(!a.classList.contains('done'))markLoc(num,false);});
   });
-  function applyFilter(){
-    var f=(document.querySelector('input[name=flt]:checked')||{}).value||'all',shown=0;
-    document.querySelectorAll('article.q[data-qid]').forEach(function(a){var id=a.dataset.qid,h=false;
-      if(f==='todo')h=!!store.m[id];else if(f==='wrong')h=!store.w[id];
-      a.classList.toggle('hide',h);if(!h)shown++;});
-    var e=document.getElementById('empty');if(e)e.style.display=shown?'none':'block';
+  var seg=document.querySelector('.toolbar .seg');
+  if(seg){
+    seg.innerHTML='<label><input type="radio" name="flt" value="all"><span>全部</span></label><label><input type="radio" name="flt" value="undone"><span>未做</span></label><label><input type="radio" name="flt" value="wrong"><span>再错</span></label>';
+    if(['all','undone','wrong'].indexOf(view.f)<0)view.f='all';
+    seg.querySelector('input[value="'+view.f+'"]').checked=true;
+    var hl=document.createElement('label');hl.className='hm-toggle';hl.innerHTML='<input type="checkbox" id="hidem"><span>屏蔽已掌握</span>';
+    seg.parentNode.insertBefore(hl,seg.nextSibling);
+    var hcb=hl.querySelector('input');hcb.checked=!!view.hm;
+    hcb.addEventListener('change',function(){view.hm=hcb.checked?1:0;saveView();applyFilter();});
   }
-  document.querySelectorAll('input[name=flt]').forEach(function(r){r.addEventListener('change',applyFilter);});
+  function applyFilter(){
+    var f=(document.querySelector('input[name=flt]:checked')||{}).value||'all',shown=0,hm=view.hm;
+    document.querySelectorAll('article.q[data-qid]').forEach(function(a){var id=a.dataset.qid,h=false;
+      if(f==='undone')h=done(id);else if(f==='wrong')h=!store.w[id];
+      if(hm&&store.m[id])h=true;
+      a.classList.toggle('hide',h);if(!h)shown++;});
+    // 某篇文章下的题全被隐藏时，连同原文一起收起
+    document.querySelectorAll('section.text-h').forEach(function(sec){var els=[],n=sec.nextElementSibling;
+      while(n&&!(n.matches('section.text-h')||n.matches('p.empty')||n.matches('nav.pager'))){els.push(n);n=n.nextElementSibling;}
+      var qs=els.filter(function(x){return x.matches('article.q');}),vis=qs.some(function(x){return !x.classList.contains('hide');});
+      var hide=qs.length>0&&!vis;sec.classList.toggle('hide',hide);els.forEach(function(x){if(x.matches('details.passage'))x.classList.toggle('hide',hide);});});
+    var e=document.getElementById('empty');if(e){e.style.display=shown?'none':'block';e.textContent=f==='undone'?'本页题目都做过了 🎉':f==='wrong'?'这个筛选下没有再错的题 🎉':'这个筛选下没有题目 🎉';}
+  }
+  document.querySelectorAll('input[name=flt]').forEach(function(r){r.addEventListener('change',function(){view.f=r.value;saveView();applyFilter();});});
   var ex=document.getElementById('expand');
   if(ex)ex.addEventListener('click',function(){var ds=document.querySelectorAll('details.ans'),open=ex.dataset.open!=='1';ds.forEach(function(d){d.open=open;});ex.dataset.open=open?'1':'0';ex.textContent=open?'收起全部答案':'展开全部答案';});
   var redo=document.getElementById('redo');
@@ -107,5 +129,6 @@
       if(!t)ce.innerHTML='<span style="color:var(--mute);font-size:14px">还没有标注错因。做错题时在题目右上角选一下，这里就会统计出你的主要问题。</span>';
       else{var mx=0;for(k in c)mx=Math.max(mx,c[k]);ce.innerHTML=(window.CAUSES||[]).filter(function(x){return c[x];}).sort(function(x,y){return c[y]-c[x];}).map(function(x){return '<div class="srow"><span class="sn">'+x+'</span><span class="sb"><span style="width:'+Math.round(c[x]*100/mx)+'%;background:var(--warn)"></span></span><span class="sc">'+c[x]+'</span></div>';}).join('');}}
   }
+  (function(){var t=document.querySelector('.toolbar');if(t&&!document.getElementById('pstat')){var d=document.createElement('div');d.className='pstat';d.id='pstat';t.parentNode.insertBefore(d,t.nextSibling);}})();
   refresh();applyFilter();
 })();
